@@ -1,13 +1,20 @@
 spring:
   datasource:
-    url: jdbc:mysql://aurora-endpoint:3306/product
-    username: master
-    password: selfmanaged
+    url: jdbc:mysql://${RDS_HOSTNAME}:3306/${RDS_DB_NAME}
+    username: ${RDS_USERNAME}
+    password: ${RDS_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
-    database-platform: org.hibernate.dialect.H2Dialect
+    database-platform: org.hibernate.dialect.MySQLDialect
     hibernate:
-      ddl-auto: 'create-drop'
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
 
-# to enable: SPRING_PROFILES_ACTIVE=test
-
+# To run: SPRING_PROFILES_ACTIVE=test
+# Set the following environment variables before running:
+# export RDS_HOSTNAME=product-service.cnwagymg8eyz.ap-south-1.rds.amazonaws.com
+# export RDS_DB_NAME=productdb
+# export RDS_USERNAME=admin
+# export RDS_PASSWORD=your_password

@@ -1,180 +1,311 @@
-Product POC – Spring Boot + MySQL + Aurora
-🚀 Overview
+# Products Application
 
-This is a minimal Spring Boot proof of concept demonstrating:
+A Spring Boot CRUD application for managing products with AWS RDS MySQL.
 
-Product CRUD (basic)
+## Prerequisites
 
-Spring Data JPA
+- Java 17 or later
+- Maven 3.6+
+- Docker (optional, for local MySQL)
+- AWS Account (for RDS setup)
+- MySQL Workbench (for database management)
 
-Profile-based configuration
+## Project Structure
 
-Local MySQL support
+```
+products/
+├── src/main/java/com.github.products/
+│   ├── controller/ProductController.java
+│   ├── dto/Product.java
+│   ├── repository/ProductRepository.java
+│   ├── service/ProductService.java
+│   └── ProductsApplication.java
+├── src/main/resources/
+│   ├── application.yml
+│   ├── application-local.yml
+│   ├── application-dev.yml
+│   └── application-test.yml
+├── Dockerfile
+├── pom.xml
+└── README.md
+```
 
-AWS Aurora MySQL support
+## Environment Profiles
 
-Dockerized application
+| Profile | Database | Purpose |
+|---------|----------|---------|
+| `local` | H2 (In-memory) | Local development |
+| `dev` | MySQL (Local/Docker) | Development testing |
+| `test` | AWS RDS MySQL | Integration testing |
 
-This project is intentionally simple and suitable for quick validation or demos — not production-ready.
+---
 
-🧱 Tech Stack
+## AWS RDS Setup (Step-by-Step)
 
-Java 17
+### Step 1 — Create the RDS Instance
 
-Spring Boot
+1. Login to **AWS Console** → navigate to **RDS**
+2. Click **"Create database"** → choose **Standard create**
+3. Engine: **MySQL Community**
+4. Template: **Free tier** (db.t4g.micro)
+5. Settings:
+   - DB instance identifier: `product-service`
+   - Master username: `admin`
+   - Master password: `<your-secure-password>`
+6. Under **Connectivity**:
+   - Set **Public access: Yes**
+   - Assign a security group (see Step 2)
+   - DB subnet group: use a group that contains **public subnets** (subnets with a route to an Internet Gateway)
+7. Click **Create database** and wait ~5 minutes for status to show **Available**
 
-Spring Data JPA
+> ⚠️ **Important — Subnet Warning:** Your DB subnet group must have a **public subnet in the same Availability Zone** where RDS is placed. Even with Public access enabled, if the RDS instance lands in a private subnet (no IGW route), external connections will fail. Check your subnets' route tables to confirm they have a `0.0.0.0/0 → igw-xxxx` route.
 
-MySQL / Aurora MySQL
+---
 
-Maven
+### Step 2 — Configure Security Group
 
-Docker
+Create or use a security group with the following **inbound rules**:
 
-📁 Project Structure
-src/main/java/com/example/product
- ├── controller
- ├── entity
- ├── repository
- ├── service
- └── ProductApplication
+| Type | Protocol | Port | Source |
+|------|----------|------|--------|
+| MySQL/Aurora | TCP | 3306 | 0.0.0.0/0 |
+| SSH | TCP | 22 | 0.0.0.0/0 |
+| HTTP | TCP | 80 | 0.0.0.0/0 |
+| PostgreSQL | TCP | 5432 | 0.0.0.0/0 |
 
-src/main/resources
- ├── application.yml
- ├── application-local.yml
- └── application-dev.yml
-⚙️ Profiles
-Profile	Database
-local	Local MySQL
-dev	AWS Aurora MySQL
-▶️ Running the Application
-✅ Run with local profile
-mvn spring-boot:run -Dspring-boot.run.profiles=local
+> For production, restrict the source to your specific IP instead of `0.0.0.0/0`.
 
-or
+---
 
-java -jar target/product-poc.jar --spring.profiles.active=local
-✅ Run with dev (Aurora)
-mvn spring-boot:run -Dspring-boot.run.profiles=dev
-🗄️ Database Setup
-Local MySQL
+### Step 3 — Create the Database Schema
 
-Create database:
+Connect to RDS using **MySQL Workbench**:
 
-CREATE DATABASE product;
+**Connection settings:**
+- Hostname: `product-service.cnwagymg8eyz.ap-south-1.rds.amazonaws.com`
+- Port: `3306`
+- Username: `admin`
+- SSL tab → SSL CA File: path to `global-bundle.pem` (downloaded from AWS)
 
-Ensure credentials in:
+Once connected, create your database:
 
-application-local.yml
-Aurora MySQL
+```sql
+CREATE DATABASE productdb;
+```
 
-Update in:
+Create the product table:
 
-application-dev.yml
+```sql
+CREATE TABLE product (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255),
+    price DOUBLE
+);
+```
 
-Replace:
+Insert sample data:
 
-endpoint
+```sql
+INSERT INTO product (name, price) VALUES
+('iPhone 15', 999.99),
+('Samsung Galaxy S24', 849.99),
+('MacBook Pro', 1999.99),
+('Dell XPS 15', 1499.99),
+('Sony WH-1000XM5', 349.99);
+```
 
-username
+---
 
-password
+### Step 4 — Configure Spring Boot (application-test.yml)
 
-Aurora is MySQL-compatible, so same driver is used.
-
-🔥 Table Creation
-
-Hibernate auto-DDL is enabled:
-
+```yaml
 spring:
+  datasource:
+    url: jdbc:mysql://${RDS_HOSTNAME}:3306/${RDS_DB_NAME}
+    username: ${RDS_USERNAME}
+    password: ${RDS_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.MySQLDialect
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+
+server:
+  port: 8080
+```
+
+> ⚠️ **Common Mistakes to Avoid:**
+> - Do NOT use `H2Dialect` when connecting to MySQL — always use `MySQLDialect`
+> - Do NOT use `create-drop` for `ddl-auto` in persistent environments — it drops all tables on restart. Use `update` for dev/test
+> - The JDBC URL **must** start with `jdbc:mysql://` and end with the database name (e.g. `/productdb`)
+> - Do NOT connect to the `mysql` system database — always create and use your own database
+
+---
+
+### Step 5 — Run the Application
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.profiles=test
+```
+
+---
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/products | Get all products |
+| GET | /api/products/{id} | Get product by ID |
+| POST | /api/products | Create new product |
+| PUT | /api/products/{id} | Update product |
+| DELETE | /api/products/{id} | Delete product |
+
+### Sample Request Body
+
+```json
+{
+  "name": "Laptop",
+  "price": 999.99
+}
+```
+
+### Testing with curl
+
+```bash
+# Create product
+curl -X POST http://localhost:8080/api/products \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Laptop","price":1299.99}'
+
+# Get all products
+curl http://localhost:8080/api/products
+
+# Get by ID
+curl http://localhost:8080/api/products/1
+
+# Update product
+curl -X PUT http://localhost:8080/api/products/1 \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Gaming Laptop","price":1499.99}'
+
+# Delete product
+curl -X DELETE http://localhost:8080/api/products/1
+```
+
+---
+
+## Local Development Setup
+
+### Profile: local (H2 Database)
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+H2 Console: http://localhost:8080/h2-console
+- JDBC URL: `jdbc:h2:mem:productdb`
+- Username: `sa`
+- Password: `password`
+
+### application-local.yml
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:h2:mem:productdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password: password
+    driver-class-name: org.h2.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+```
+
+### Profile: dev (Local MySQL via Docker)
+
+```bash
+docker run --name mysql-dev \
+  -e MYSQL_DATABASE=productdb \
+  -e MYSQL_USER=devuser \
+  -e MYSQL_PASSWORD=devpass \
+  -e MYSQL_ROOT_PASSWORD=rootpass \
+  -p 3306:3306 \
+  -d mysql:8.0
+
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
+```
+
+### application-dev.yml
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/productdb?useSSL=false&serverTimezone=UTC
+    username: devuser
+    password: devpass
+    driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
       ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+```
 
-On startup, tables are created automatically if missing.
+---
 
-📬 API Testing (Postman)
-➜ Create Product
+## Troubleshooting
 
-POST
+### `claims to not accept jdbcUrl`
+Your JDBC URL is missing the `jdbc:mysql://` prefix. The URL must follow this exact format:
+```
+jdbc:mysql://<host>:<port>/<database_name>
+```
 
-http://localhost:8080/products
+### `Access denied for user 'admin'@'%' to database 'mysql'`
+You're connecting to the MySQL system database. Make sure your JDBC URL ends with your own database name (e.g. `/productdb`), not `/mysql`.
 
-Body:
+### `Unable to build Hibernate SessionFactory`
+You're likely using `H2Dialect` while connecting to MySQL. Change `database-platform` to `org.hibernate.dialect.MySQLDialect`.
 
-{
-  "name": "iPhone",
-  "price": 999.99
-}
-➜ Get All Products
+### RDS Connection Timeout / Cannot Connect from Workbench
+- Check that **Public access** is set to **Yes** on the RDS instance
+- Verify the subnet your RDS instance is in has a route table with `0.0.0.0/0 → igw-xxxx`
+- Confirm security group inbound rules allow port **3306**
 
-GET
+---
 
-http://localhost:8080/products
-🐳 Docker
-1. Build jar
-mvn clean package
-2. Build image
-docker build -t product-poc:latest .
-3. Run container (local profile)
+## Security Best Practices
 
-Mac/Windows:
+- Never commit credentials to Git — use environment variables or AWS Secrets Manager
+- Restrict security group source to your specific IP in production (not `0.0.0.0/0`)
+- Use private subnets for RDS in production
+- Enable encryption at rest and automated backups for production databases
+- Use `validate` for `ddl-auto` in production (never `create-drop`)
 
-docker run -p 8080:8080 \
-  -e SPRING_PROFILES_ACTIVE=local \
-  -e SPRING_DATASOURCE_URL=jdbc:mysql://host.docker.internal:3306/product \
-  product-poc:latest
+---
 
-Linux:
+## Clean Up AWS Resources
 
-docker run -p 8080:8080 \
-  -e SPRING_PROFILES_ACTIVE=local \
-  -e SPRING_DATASOURCE_URL=jdbc:mysql://172.17.0.1:3306/product \
-  product-poc:latest
-4. Run with Aurora
-docker run -p 8080:8080 \
-  -e SPRING_PROFILES_ACTIVE=dev \
-  product-poc:latest
-🧪 Quick Verification
+```bash
+# Delete RDS instance
+aws rds delete-db-instance \
+  --db-instance-identifier product-service \
+  --skip-final-snapshot
 
-On startup logs you should see:
-
-The following profiles are active: <profile>
-
-If not — your profile is not applied.
-
-⚠️ Known Limitations (Intentional)
-
-This is a POC. It does not include:
-
-DTO layer
-
-Validation
-
-Exception handling
-
-Flyway/Liquibase
-
-Connection pool tuning
-
-Security
-
-🧠 Production Notes (Important)
-
-If you ever evolve this:
-
-Do not use ddl-auto=update in production
-
-Use Flyway or Liquibase
-
-Tune HikariCP
-
-Add health checks
-
-Add proper logging
-
-👨‍💻 Author
-
-POC created for rapid backend validation and environment testing.
-
-Done. Minimal. Functional. Extend as needed.
+# Delete security group
+aws ec2 delete-security-group \
+  --group-id <security-group-id>
+```
