@@ -116,38 +116,117 @@ INSERT INTO product (name, price) VALUES
 
 ---
 
-### Step 4 — Configure Spring Boot (application-test.yml)
+### Step 4 — Create a Secret in AWS Secrets Manager
+
+The application fetches database credentials at startup from AWS Secrets Manager instead of hardcoding them in the YAML file.
+
+1. Go to **AWS Console → Secrets Manager → Store a new secret**
+2. Select **Credentials for Amazon RDS database**
+3. Enter:
+   - Username: `admin`
+   - Password: `<your-rds-password>`
+   - Select your RDS instance: `product-service`
+4. On the next screen, give it a secret name e.g. `product-service-db-credentials`
+5. Leave rotation disabled for now → click **Store**
+
+After creation, the secret will contain a JSON like this:
+
+```json
+{
+  "engine": "mysql",
+  "host": "product-service.cnwagymg8eyz.ap-south-1.rds.amazonaws.com",
+  "username": "admin",
+  "password": "your_password",
+  "dbname": "productdb",
+  "port": "3306"
+}
+```
+
+> Note the **Secret name** (or ARN) — you will need it in Step 5.
+
+---
+
+### Step 5 — Create an IAM User with Secrets Manager Access
+
+The application needs AWS credentials to fetch the secret. Create a dedicated IAM user:
+
+1. Go to **AWS Console → IAM → Users → Create user**
+2. Username: `product-service-app`
+3. Attach policy: **SecretsManagerReadWrite** (or a custom policy scoped to your secret ARN)
+4. After creation, go to **Security credentials → Create access key**
+5. Choose **Application running outside AWS** → create and **save the Access Key ID and Secret Access Key**
+
+---
+
+### Step 6 — Configure Spring Boot (application-test.yml)
+
+The datasource is **not** configured in the YAML — it is built programmatically in `ApplicationConfig.java` using the secret fetched from Secrets Manager. The YAML only needs to provide AWS connection details and the secret name:
 
 ```yaml
+cloud:
+  aws:
+    region: ${CLOUD_AWS_REGION:ap-south-1}
+    credentials:
+      access-key: ${CLOUD_AWS_ACCESS_KEY:}
+      secret-key: ${CLOUD_AWS_SECRET_KEY:}
+
+app:
+  secret:
+    name: ${APP_SECRET_NAME}
+
 spring:
-  datasource:
-    url: jdbc:mysql://${RDS_HOSTNAME}:3306/${RDS_DB_NAME}
-    username: ${RDS_USERNAME}
-    password: ${RDS_PASSWORD}
-    driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     database-platform: org.hibernate.dialect.MySQLDialect
     hibernate:
       ddl-auto: update
-    show-sql: true
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
-        format_sql: true
 
 server:
   port: 8080
 ```
 
-> ⚠️ **Common Mistakes to Avoid:**
-> - Do NOT use `H2Dialect` when connecting to MySQL — always use `MySQLDialect`
-> - Do NOT use `create-drop` for `ddl-auto` in persistent environments — it drops all tables on restart. Use `update` for dev/test
-> - The JDBC URL **must** start with `jdbc:mysql://` and end with the database name (e.g. `/productdb`)
-> - Do NOT connect to the `mysql` system database — always create and use your own database
+This file is **safe to commit** — it contains no credentials.
 
 ---
 
-### Step 5 — Run the Application
+### Step 7 — Set Environment Variables
+
+Before running, export the following environment variables in your terminal:
+
+```bash
+export CLOUD_AWS_REGION=ap-south-1
+export CLOUD_AWS_ACCESS_KEY=<your-iam-access-key-id>
+export CLOUD_AWS_SECRET_KEY=<your-iam-secret-access-key>
+export APP_SECRET_NAME=product-service-db-credentials
+```
+
+Alternatively, create a `.env` file locally (add it to `.gitignore` — never commit this):
+
+```
+CLOUD_AWS_REGION=ap-south-1
+CLOUD_AWS_ACCESS_KEY=your_access_key_id
+CLOUD_AWS_SECRET_KEY=your_secret_access_key
+APP_SECRET_NAME=product-service-db-credentials
+```
+
+---
+
+### Step 8 — How It Works (ApplicationConfig.java)
+
+At startup, the `ApplicationConfig` class:
+1. Reads AWS credentials and region from environment variables
+2. Builds a `SecretsManagerClient`
+3. Fetches the secret JSON from Secrets Manager using the secret name
+4. Parses it into an `AwsSecrets` object (host, port, username, password, engine, dbname)
+5. Constructs and returns the `DataSource` bean dynamically
+
+> If `CLOUD_AWS_ACCESS_KEY` and `CLOUD_AWS_SECRET_KEY` are blank, the app falls back to the **default AWS credential chain** (useful when running on EC2 or ECS with an IAM role attached — no keys needed at all).
+
+---
+
+### Step 9 — Run the Application
 
 ```bash
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=test
@@ -268,6 +347,15 @@ spring:
 
 ## Troubleshooting
 
+### `Failed to retrieve secret from AWS Secrets Manager`
+- Verify `APP_SECRET_NAME` matches exactly the secret name in AWS Console
+- Check that your IAM user has `secretsmanager:GetSecretValue` permission
+- Confirm `CLOUD_AWS_ACCESS_KEY` and `CLOUD_AWS_SECRET_KEY` are correctly set
+- Make sure the secret is in the same region as `CLOUD_AWS_REGION`
+
+### `Database secrets not available from AWS Secrets Manager`
+The secret was fetched but returned empty. Verify the secret value in AWS Console contains valid JSON with `host`, `port`, `username`, `password`, and `engine` fields.
+
 ### `claims to not accept jdbcUrl`
 Your JDBC URL is missing the `jdbc:mysql://` prefix. The URL must follow this exact format:
 ```
@@ -275,7 +363,7 @@ jdbc:mysql://<host>:<port>/<database_name>
 ```
 
 ### `Access denied for user 'admin'@'%' to database 'mysql'`
-You're connecting to the MySQL system database. Make sure your JDBC URL ends with your own database name (e.g. `/productdb`), not `/mysql`.
+The `dbname` field in your Secrets Manager secret is missing or empty — it defaulted to the `mysql` system database. Add `"dbname": "productdb"` to your secret JSON.
 
 ### `Unable to build Hibernate SessionFactory`
 You're likely using `H2Dialect` while connecting to MySQL. Change `database-platform` to `org.hibernate.dialect.MySQLDialect`.
