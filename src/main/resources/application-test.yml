@@ -1,14 +1,14 @@
 cloud:
   aws:
     region: ${CLOUD_AWS_REGION:ap-south-1}
+    endpoint: ${CLOUD_AWS_ENDPOINT:}
     credentials:
       access-key: ${CLOUD_AWS_ACCESS_KEY:}
       secret-key: ${CLOUD_AWS_SECRET_KEY:}
-
 app:
   secret:
     # Secret name/ARN in AWS Secrets Manager
-    name: ${APP_SECRET_NAME:productdb}
+    name: ${APP_SECRET_NAME:}
 
 spring:
   jpa:
