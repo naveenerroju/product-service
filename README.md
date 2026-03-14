@@ -234,6 +234,122 @@ At startup, the `ApplicationConfig` class:
 
 ---
 
+## AWS SQS Setup (Addition)
+
+This application can publish product events to an AWS SQS queue. The following steps show how to create a queue, grant minimal permissions, configure the app, and test locally (including LocalStack).
+
+### SQS (Console)
+
+1. Open **AWS Console** → **SQS**
+2. Click **Create queue** → choose **Standard** (default)
+3. Queue name: `products-queue` (or a name you prefer)
+4. Keep default settings or adjust VisibilityTimeout/Retention as required
+5. Create the queue and copy the **Queue URL** — you'll need it for configuration
+
+### SQS (AWS CLI)
+
+Create a queue:
+
+```bash
+aws sqs create-queue --queue-name products-queue --attributes VisibilityTimeout=30
+```
+
+Get the queue URL:
+
+```bash
+aws sqs get-queue-url --queue-name products-queue
+```
+
+Send a test message (CLI):
+
+```bash
+aws sqs send-message --queue-url https://sqs.<region>.amazonaws.com/<acct>/products-queue --message-body '{"event":"test","productId":123}'
+```
+
+### Local testing with LocalStack (optional)
+
+Start LocalStack (Docker):
+
+```bash
+docker run --rm -d --name localstack -p 4566:4566 localstack/localstack
+```
+
+Create the queue against LocalStack:
+
+```bash
+AWS_DEFAULT_REGION=us-east-1 AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test \
+aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name products-queue
+```
+
+Configure the application to point to LocalStack by setting an `aws.sqs.endpoint` property (see application-local.yml if present).
+
+### IAM example (minimum SQS permissions)
+
+Attach a policy to the service role/user with these actions:
+
+- sqs:SendMessage
+- sqs:ReceiveMessage
+- sqs:DeleteMessage
+- sqs:GetQueueUrl
+
+Example policy JSON (adjust Resource ARN):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueUrl"
+      ],
+      "Resource": "arn:aws:sqs:REGION:ACCOUNT_ID:products-queue"
+    }
+  ]
+}
+```
+
+### Application configuration (example)
+
+Add the following keys to your profile YAML (application-local.yml or application-dev.yml) or provide them via environment variables:
+
+```yaml
+aws:
+  region: us-east-1
+  sqs:
+    queue-name: products-queue
+    # Optional endpoint for LocalStack testing
+    endpoint: http://localhost:4566
+```
+
+If your code expects a queue URL instead of name, set AWS_SQS_QUEUE_URL environment variable or `aws.sqs.queue-url` property.
+
+### How it's used
+
+- Product create/update operations in `ProductService` may publish a JSON message to the configured SQS queue.
+- The `AwsSQSConfig` class configures the AWS SQS client; ensure it uses region, credentials and optional endpoint for LocalStack.
+
+### Testing SQS integration locally
+
+1. Run LocalStack and create the queue (see above)
+2. Start the application with the `local` profile and ensure `aws.sqs.endpoint` points to `http://localhost:4566`
+3. Create a product via the API and verify the message in LocalStack (or use the AWS CLI with --endpoint-url)
+
+Example: send message and receive
+
+```bash
+# send
+aws --endpoint-url=http://localhost:4566 sqs send-message --queue-url http://localhost:4566/000000000000/products-queue --message-body '{"event":"created","productId":123}'
+
+# receive
+aws --endpoint-url=http://localhost:4566 sqs receive-message --queue-url http://localhost:4566/000000000000/products-queue
+```
+
+---
+
 ## API Endpoints
 
 | Method | Endpoint | Description |

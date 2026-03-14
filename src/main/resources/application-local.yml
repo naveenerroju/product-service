@@ -1,12 +1,16 @@
 spring:
-  datasource:
-    url: jdbc:h2:mem:mydb
-    username: sa
-    password: password
-    driverClassName: org.h2.Driver
-  jpa:
-    database-platform: org.hibernate.dialect.H2Dialect
-    hibernate:
-      ddl-auto: 'create-drop'
+  profiles: local
 
-# to enable: SPRING_PROFILES_ACTIVE=local
+aws:
+  region: us-east-1
+  sqs:
+    queue-name: products-queue
+    # Optional endpoint for LocalStack testing. Comment out in AWS environment
+    endpoint: http://localhost:4566
+
+# Example datasource if used by project
+# spring:
+#   datasource:
+#     url: jdbc:h2:mem:products;DB_CLOSE_DELAY=-1
+#     username: sa
+#     password:
