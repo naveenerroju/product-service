@@ -12,9 +12,9 @@
 
 spring:
   datasource:
-    url: jdbc:mysql://product-db.cnwagymg8eyz.ap-south-1.rds.amazonaws.com:3306/productdb
+    url: jdbc:mysql://${DB_HOST:product-db.cnwagymg8eyz.ap-south-1.rds.amazonaws.com}:${DB_PORT:3306}/${DB_NAME:productdb}
     username: ${DB_USERNAME:admin}
-    password: ${DB_PASSWORD}
+    password: ${DB_PASSWORD:password}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     database-platform: org.hibernate.dialect.MySQLDialect
