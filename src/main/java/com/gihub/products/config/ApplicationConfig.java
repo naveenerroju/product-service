@@ -1,3 +1,4 @@
+/*
 package com.gihub.products.config;
 
 import com.gihub.products.dto.AwsSecrets;
@@ -84,4 +85,4 @@ public class ApplicationConfig {
             client.close();
         }
     }
-}
+}*/
